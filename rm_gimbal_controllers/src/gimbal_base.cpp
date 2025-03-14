@@ -116,6 +116,8 @@ bool Controller::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& ro
         return false;
     }
   }
+  double r = getParam(controller_nh, "controllers/yaw/r", 40.);
+  tracking_differentiator_ = std::make_unique<NonlinearTrackingDifferentiator<double>>(r, 0.001);
 
   robot_state_handle_ = robot_hw->get<rm_control::RobotStateInterface>()->getHandle("robot_state");
   if (!controller_nh.hasParam("imu_name"))
@@ -472,6 +474,8 @@ void Controller::moveJoint(const ros::Time& time, const ros::Duration& period)
       ROS_WARN("%s", ex.what());
     }
   }
+  tracking_differentiator_->update(pos_des[2], vel_des[2]);
+  angle_error[2] = angles::shortest_angular_distance(pos_real[2], tracking_differentiator_->getX1());
   for (const auto& in_limit : pos_des_in_limit_)
     if (!in_limit.second)
       vel_des[in_limit.first] = 0.;
@@ -503,8 +507,8 @@ void Controller::moveJoint(const ros::Time& time, const ros::Duration& period)
         pub.second->msg_.set_point = pos_des[pub.first];
         pub.second->msg_.set_point_dot = vel_des[pub.first];
         pub.second->msg_.process_value = pos_real[pub.first];
-        pub.second->msg_.error = angle_error[pub.first];
-        pub.second->msg_.command = pid_pos_.at(pub.first)->getCurrentCmd();
+        pub.second->msg_.error = angles::shortest_angular_distance(pos_real[pub.first], pos_des[pub.first]);
+        pub.second->msg_.command = tracking_differentiator_->getX1();
         pub.second->unlockAndPublish();
       }
     }

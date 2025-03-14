@@ -43,6 +43,7 @@
 #include <hardware_interface/imu_sensor_interface.h>
 #include <rm_common/hardware_interface/robot_state_interface.h>
 #include <rm_common/filters/filters.h>
+#include <rm_common/traj_gen.h>
 #include <rm_msgs/GimbalCmd.h>
 #include <rm_msgs/TrackData.h>
 #include <rm_msgs/GimbalDesError.h>
@@ -161,6 +162,7 @@ private:
   std::unordered_map<int, std::unique_ptr<control_toolbox::Pid>> pid_pos_;
   std::unordered_map<int, urdf::JointConstSharedPtr> joint_urdfs_;
   std::unordered_map<int, bool> pos_des_in_limit_;
+  std::unique_ptr<NonlinearTrackingDifferentiator<double>> tracking_differentiator_;
   bool has_imu_ = true;
 
   std::shared_ptr<BulletSolver> bullet_solver_;
