@@ -107,7 +107,7 @@ bool Controller::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& ro
         joint_urdfs_.insert(std::make_pair(axis, joint_urdf));
       }
 
-      double r = getParam(nh, "r", 40.);
+      double r = getParam(nh, "r", 200.);
       tracking_differentiator_.insert(
           std::make_pair(axis, std::make_unique<NonlinearTrackingDifferentiator<double>>(r, 0.001)));
       ctrls_.insert(std::make_pair(axis, std::make_unique<effort_controllers::JointVelocityController>()));
@@ -173,8 +173,12 @@ void Controller::update(const ros::Time& time, const ros::Duration& period)
   ramp_rate_yaw_->setAcc(config_.accel_yaw_);
   ramp_rate_pitch_->input(cmd_gimbal_.rate_pitch);
   ramp_rate_yaw_->input(cmd_gimbal_.rate_yaw);
-  //  cmd_gimbal_.rate_pitch = ramp_rate_pitch_->output();
-  //  cmd_gimbal_.rate_yaw = ramp_rate_yaw_->output();
+  if (cmd_gimbal_.rate_yaw != 0)
+    ramp_rate_yaw_->clear(cmd_gimbal_.rate_yaw);
+  if (cmd_gimbal_.rate_pitch != 0)
+    ramp_rate_pitch_->clear(cmd_gimbal_.rate_pitch);
+  cmd_gimbal_.rate_pitch = ramp_rate_pitch_->output();
+  cmd_gimbal_.rate_yaw = ramp_rate_yaw_->output();
   try
   {
     odom2gimbal_ = robot_state_handle_.lookupTransform("odom", odom2gimbal_.child_frame_id, time);
@@ -233,6 +237,10 @@ void Controller::rate(const ros::Time& time, const ros::Duration& period)
       odom2gimbal_des_.transform.rotation = odom2gimbal_.transform.rotation;
       odom2gimbal_des_.header.stamp = time;
       robot_state_handle_.setTransform(odom2gimbal_des_, "rm_gimbal_controllers");
+      double des[3]{ 0. };
+      quatToRPY(odom2gimbal_des_.transform.rotation, des[0], des[1], des[2]);
+      for (const auto& td : tracking_differentiator_)
+        td.second->clear(des[td.first]);
       start_ = false;
     }
   }
