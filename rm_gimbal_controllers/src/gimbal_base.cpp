@@ -107,6 +107,9 @@ bool Controller::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& ro
         joint_urdfs_.insert(std::make_pair(axis, joint_urdf));
       }
 
+      double r = getParam(nh, "r", 40.);
+      tracking_differentiator_.insert(
+          std::make_pair(axis, std::make_unique<NonlinearTrackingDifferentiator<double>>(r, 0.001)));
       ctrls_.insert(std::make_pair(axis, std::make_unique<effort_controllers::JointVelocityController>()));
       pid_pos_.insert(std::make_pair(axis, std::make_unique<control_toolbox::Pid>()));
       pos_state_pub_.insert(std::make_pair(
@@ -116,8 +119,6 @@ bool Controller::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& ro
         return false;
     }
   }
-  double r = getParam(controller_nh, "controllers/yaw/r", 40.);
-  tracking_differentiator_ = std::make_unique<NonlinearTrackingDifferentiator<double>>(r, 0.001);
 
   robot_state_handle_ = robot_hw->get<rm_control::RobotStateInterface>()->getHandle("robot_state");
   if (!controller_nh.hasParam("imu_name"))
@@ -172,8 +173,8 @@ void Controller::update(const ros::Time& time, const ros::Duration& period)
   ramp_rate_yaw_->setAcc(config_.accel_yaw_);
   ramp_rate_pitch_->input(cmd_gimbal_.rate_pitch);
   ramp_rate_yaw_->input(cmd_gimbal_.rate_yaw);
-  cmd_gimbal_.rate_pitch = ramp_rate_pitch_->output();
-  cmd_gimbal_.rate_yaw = ramp_rate_yaw_->output();
+  //  cmd_gimbal_.rate_pitch = ramp_rate_pitch_->output();
+  //  cmd_gimbal_.rate_yaw = ramp_rate_yaw_->output();
   try
   {
     odom2gimbal_ = robot_state_handle_.lookupTransform("odom", odom2gimbal_.child_frame_id, time);
@@ -474,8 +475,12 @@ void Controller::moveJoint(const ros::Time& time, const ros::Duration& period)
       ROS_WARN("%s", ex.what());
     }
   }
-  tracking_differentiator_->update(pos_des[2], vel_des[2]);
-  angle_error[2] = angles::shortest_angular_distance(pos_real[2], tracking_differentiator_->getX1());
+  for (const auto& td : tracking_differentiator_)
+  {
+    td.second->update(pos_des[td.first], vel_des[td.first]);
+    angle_error[td.first] = angles::shortest_angular_distance(pos_real[td.first], td.second->getX1());
+    vel_des[td.first] = vel_des[td.first] == 0. ? td.second->getX2() : vel_des[td.first];
+  }
   for (const auto& in_limit : pos_des_in_limit_)
     if (!in_limit.second)
       vel_des[in_limit.first] = 0.;
@@ -508,7 +513,7 @@ void Controller::moveJoint(const ros::Time& time, const ros::Duration& period)
         pub.second->msg_.set_point_dot = vel_des[pub.first];
         pub.second->msg_.process_value = pos_real[pub.first];
         pub.second->msg_.error = angles::shortest_angular_distance(pos_real[pub.first], pos_des[pub.first]);
-        pub.second->msg_.command = tracking_differentiator_->getX1();
+        pub.second->msg_.command = tracking_differentiator_[pub.first]->getX1();
         pub.second->unlockAndPublish();
       }
     }

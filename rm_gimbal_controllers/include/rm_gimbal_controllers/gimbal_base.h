@@ -158,11 +158,11 @@ private:
 
   rm_control::RobotStateHandle robot_state_handle_;
   hardware_interface::ImuSensorHandle imu_sensor_handle_;
+  std::unordered_map<int, std::unique_ptr<NonlinearTrackingDifferentiator<double>>> tracking_differentiator_;
   std::unordered_map<int, std::unique_ptr<effort_controllers::JointVelocityController>> ctrls_;
   std::unordered_map<int, std::unique_ptr<control_toolbox::Pid>> pid_pos_;
   std::unordered_map<int, urdf::JointConstSharedPtr> joint_urdfs_;
   std::unordered_map<int, bool> pos_des_in_limit_;
-  std::unique_ptr<NonlinearTrackingDifferentiator<double>> tracking_differentiator_;
   bool has_imu_ = true;
 
   std::shared_ptr<BulletSolver> bullet_solver_;
