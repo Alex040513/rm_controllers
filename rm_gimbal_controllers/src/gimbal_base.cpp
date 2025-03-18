@@ -500,7 +500,7 @@ void Controller::moveJoint(const ros::Time& time, const ros::Duration& period)
       ROS_WARN("%s", ex.what());
     }
   }
-  for (const auto& td : tracking_differentiator_)
+  for (auto& td : tracking_differentiator_)
   {
     td.second->update(pos_des[td.first], vel_des[td.first]);
     angle_error[td.first] = angles::shortest_angular_distance(pos_real[td.first], td.second->getX1());
