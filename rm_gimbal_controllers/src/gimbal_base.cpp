@@ -239,7 +239,7 @@ void Controller::rate(const ros::Time& time, const ros::Duration& period)
       robot_state_handle_.setTransform(odom2gimbal_des_, "rm_gimbal_controllers");
       double des[3]{ 0. };
       quatToRPY(odom2gimbal_des_.transform.rotation, des[0], des[1], des[2]);
-      for (const auto& td : tracking_differentiator_)
+      for (auto& td : tracking_differentiator_)
         td.second->clear(des[td.first]);
       start_ = false;
     }
@@ -355,6 +355,23 @@ void Controller::traj(const ros::Time& time)
   {  // on enter
     state_changed_ = false;
     ROS_INFO("[Gimbal] Enter TRAJ");
+    std::string frame_id;
+    if (!cmd_gimbal_.traj_frame_id.empty())
+      frame_id = cmd_gimbal_.traj_frame_id;
+    else
+      frame_id = "odom";
+    try
+    {
+      double traj[3]{ 0. };
+      geometry_msgs::TransformStamped odom2traj = robot_state_handle_.lookupTransform("odom", frame_id, time);
+      quatToRPY(odom2traj.transform.rotation, traj[0], traj[1], traj[2]);
+      for (auto& td : tracking_differentiator_)
+        td.second->clear(traj[td.first]);
+    }
+    catch (tf2::TransformException& ex)
+    {
+      ROS_WARN("%s", ex.what());
+    }
   }
   double traj[3]{ 0. };
   try
@@ -487,7 +504,6 @@ void Controller::moveJoint(const ros::Time& time, const ros::Duration& period)
   {
     td.second->update(pos_des[td.first], vel_des[td.first]);
     angle_error[td.first] = angles::shortest_angular_distance(pos_real[td.first], td.second->getX1());
-    vel_des[td.first] = vel_des[td.first] == 0. ? td.second->getX2() : vel_des[td.first];
   }
   for (const auto& in_limit : pos_des_in_limit_)
     if (!in_limit.second)
