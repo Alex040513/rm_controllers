@@ -112,6 +112,7 @@ bool Controller::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& ro
           std::make_pair(axis, std::make_unique<NonlinearTrackingDifferentiator<double>>(r, 0.001)));
       ctrls_.insert(std::make_pair(axis, std::make_unique<effort_controllers::JointVelocityController>()));
       pid_pos_.insert(std::make_pair(axis, std::make_unique<control_toolbox::Pid>()));
+      pos_des_in_limit_.insert(std::make_pair(axis, true));
       pos_state_pub_.insert(std::make_pair(
           axis, std::make_unique<realtime_tools::RealtimePublisher<rm_msgs::GimbalPosState>>(nh, "pos_state", 1)));
 
@@ -183,6 +184,7 @@ void Controller::update(const ros::Time& time, const ros::Duration& period)
   {
     odom2gimbal_ = robot_state_handle_.lookupTransform("odom", odom2gimbal_.child_frame_id, time);
     odom2base_ = robot_state_handle_.lookupTransform("odom", odom2base_.child_frame_id, time);
+    odom2chassis_ = robot_state_handle_.lookupTransform("odom", "base_link", time);
   }
   catch (tf2::TransformException& ex)
   {
@@ -220,7 +222,7 @@ void Controller::setDes(const ros::Time& time, double yaw_des, double pitch_des)
   odom2gimbal_des.setRPY(0, pitch_des, yaw_des);
   tf2::Quaternion base2gimbal_des = odom2base.inverse() * odom2gimbal_des;
   for (const auto& it : joint_urdfs_)
-    pos_des_in_limit_.insert(std::make_pair(it.first, setDesIntoLimit(base2gimbal_des, it.second, base2gimbal_des)));
+    pos_des_in_limit_[it.first] = setDesIntoLimit(base2gimbal_des, it.second, base2gimbal_des);
   odom2gimbal_des_.transform.rotation = tf2::toMsg(odom2base * base2gimbal_des);
   odom2gimbal_des_.header.stamp = time;
   robot_state_handle_.setTransform(odom2gimbal_des_, "rm_gimbal_controllers");
@@ -470,6 +472,9 @@ void Controller::moveJoint(const ros::Time& time, const ros::Duration& period)
     bullet_solver_->getSelectedArmorPosAndVel(target_pos, target_vel, data_track_.position, data_track_.velocity,
                                               data_track_.yaw, data_track_.v_yaw, data_track_.radius_1,
                                               data_track_.radius_2, data_track_.dz, data_track_.armors_num);
+    target_vel.x -= chassis_vel_->linear_->x();
+    target_vel.y -= chassis_vel_->linear_->y();
+    target_vel.z -= chassis_vel_->linear_->z();
     tf2::Vector3 target_pos_tf, target_vel_tf;
     try
     {
@@ -569,14 +574,14 @@ double Controller::feedForward(const ros::Time& time)
 
 void Controller::updateChassisVel()
 {
-  double tf_period = odom2base_.header.stamp.toSec() - last_odom2base_.header.stamp.toSec();
-  double linear_x = (odom2base_.transform.translation.x - last_odom2base_.transform.translation.x) / tf_period;
-  double linear_y = (odom2base_.transform.translation.y - last_odom2base_.transform.translation.y) / tf_period;
-  double linear_z = (odom2base_.transform.translation.z - last_odom2base_.transform.translation.z) / tf_period;
+  double tf_period = odom2chassis_.header.stamp.toSec() - last_odom2chassis_.header.stamp.toSec();
+  double linear_x = (odom2chassis_.transform.translation.x - last_odom2chassis_.transform.translation.x) / tf_period;
+  double linear_y = (odom2chassis_.transform.translation.y - last_odom2chassis_.transform.translation.y) / tf_period;
+  double linear_z = (odom2chassis_.transform.translation.z - last_odom2chassis_.transform.translation.z) / tf_period;
   double last_angular_position_x, last_angular_position_y, last_angular_position_z, angular_position_x,
       angular_position_y, angular_position_z;
-  quatToRPY(odom2base_.transform.rotation, angular_position_x, angular_position_y, angular_position_z);
-  quatToRPY(last_odom2base_.transform.rotation, last_angular_position_x, last_angular_position_y,
+  quatToRPY(odom2chassis_.transform.rotation, angular_position_x, angular_position_y, angular_position_z);
+  quatToRPY(last_odom2chassis_.transform.rotation, last_angular_position_x, last_angular_position_y,
             last_angular_position_z);
   double angular_x = angles::shortest_angular_distance(last_angular_position_x, angular_position_x) / tf_period;
   double angular_y = angles::shortest_angular_distance(last_angular_position_y, angular_position_y) / tf_period;
@@ -584,7 +589,7 @@ void Controller::updateChassisVel()
   double linear_vel[3]{ linear_x, linear_y, linear_z };
   double angular_vel[3]{ angular_x, angular_y, angular_z };
   chassis_vel_->update(linear_vel, angular_vel, tf_period);
-  last_odom2base_ = odom2base_;
+  last_odom2chassis_ = odom2chassis_;
 }
 
 std::string Controller::getGimbalFrameID(std::unordered_map<int, urdf::JointConstSharedPtr> joint_urdfs)
